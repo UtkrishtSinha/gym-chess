@@ -25,7 +25,7 @@ class ChessEnv(gym.Env):
     # Positive means White
     # Negative means Black
 
-    def __init__(self, player=None, state=None):
+    def __init__(self, player=1, state=None):
         self.player = player
         self.state = state
         self.empty = ['.', 'x', ' ', '', '0', 'o', 0, None]
@@ -52,6 +52,7 @@ class ChessEnv(gym.Env):
         self.nn = None
         self.m = None
         self.n = -1
+        self.move_handler = MoveHandler(p=self.player)
         return
 
     def step(self, action):
@@ -74,14 +75,14 @@ class ChessEnv(gym.Env):
         return new_state, reward, done, info
 
     def reset(self):
-        state = [-3,   -5,  -4,  -2,  -1,  -4,  -5,  -3,
-                      -6,   -6,  -6,  -6,  -6,  -6,  -6,  -6,
-                      '.', '.', '.', '.', '.', '.', '.', '.',
-                      '.', '.', '.', '.', '.', '.', '.', '.',
-                      '.', '.', '.', '.', '.', '.', '.', '.',
-                      '.', '.', '.', '.', '.', '.', '.', '.',
-                      6,     6,   6,   6,   6,   6,   6,   6,
-                      3,     5,   4,   2,   1,   4,   5,   3]
+        state = [-3,    -5,     -4,     -2,     -1,     -4,     -5,     -3,
+                 -6,    -6,     -6,     -6,     -6,     -6,     -6,     -6,
+                 '.',   '.',    '.',    '.',    '.',    '.',    '.',    '.',
+                 '.',   '.',    '.',    '.',    '.',    '.',    '.',    '.',
+                 '.',   '.',    '.',    '.',    '.',    '.',    '.',    '.',
+                 '.',   '.',    '.',    '.',    '.',    '.',    '.',    '.',
+                 6,     6,      6,      6,      6,      6,      6,      6,
+                 3,     5,      4,      2,      1,      4,      5,      3]
         # state = ['.', '.', '.', '.', -1, '.', '.', '.',
         #               '.', '.', '.', '.', '.', '.', '.', '.',
         #               '.', '.', '.', '.', '.', '.', '.', '.',
@@ -172,6 +173,109 @@ class ChessEnv(gym.Env):
         self.opponent_moves = deepcopy(opp_moves)
         return reward
 
+    def action_notation(self, ind):
+        indic = 'o'
+        # ind = self.action_space[action]
+        pos_from = self.available_moves[ind][0]
+        pos_to = self.available_moves[ind][1]
+        promoted = self.available_moves[ind][2]
+        if self.state[pos_to] == indic and self.state[pos_from] in [1, -1]:
+            if pos_from - pos_to == 2:
+                return "0-0-0"
+            elif pos_from - pos_to == -2:
+                return "0-0"
+            else:
+                return
+        if self.state[pos_from] in ['.', 'x']:
+            return
+        move = ChessEnv.piece_notations[self.state[pos_from]]
+        row_flag = False
+        col_flag = False
+        flag = False
+        for m in self.available_moves:
+            if m[1] == pos_to and self.state[m[0]] == self.state[pos_from]:
+                if m[0] == pos_from:
+                    continue
+                flag = True
+                if row_flag:
+                    pass
+                else:
+                    if m[0] % 8 == pos_from % 8:
+                        row_flag = True
+
+                if col_flag:
+                    pass
+                else:
+                    if m[0] // 8 == pos_from // 8:
+                        col_flag = True
+        if row_flag and col_flag:
+            move = move + index_to_pos(pos_from)
+        elif row_flag and self.state[pos_from] not in [6, -6]:
+            move = move + index_to_pos(pos_from)[1]
+        elif col_flag or flag:
+            move = move + index_to_pos(pos_from)[0]
+        if move == '' and self.state[pos_to] in self.opponent:
+            move = index_to_pos(pos_from)[0]
+        if self.state[pos_to] in self.opponent:
+            move = move + 'x'
+        move = move + index_to_pos(pos_to)
+        if self.state[pos_from] in [1, -1]:
+            if pos_from - pos_to == 2:
+                move = "0-0-0"
+            elif pos_from - pos_to == -2:
+                move = "0-0"
+        if promoted not in [0, '.', 'x', '', None]:
+            move = move + '=' + ChessEnv.piece_notations[promoted]
+        return move
+
+    def set_state(self, state=None):
+        if state is None:
+            self.reset()
+        else:
+            self.state = state
+
+    def set_game_file(self, file, move_file=None, move_list=None):
+        self.game_file = file
+        self.move_file = move_file
+        self.move_list = move_list
+
+    def print_state(self, state=None):
+        if state is None:
+            state = self.state
+        for ind in range(8):
+            for j in range(8):
+                index = 8*ind + j
+                print(state[index], end="\t")
+            print()
+
+    def set_nn(self, nn):
+        self.nn = nn
+        
+    def compute_moves(self):
+        self.available_moves, self.opponent_moves = self.move_handler.compute_moves()
+
+class MoveHandler:
+
+    def __init__(self, p=None):
+        self.player = 1
+        self.opponent = None
+        self.teammate = None
+        self.available_moves = None
+        self.opponent_moves = None
+        self.state = None
+        if p is not None:
+            self.set_player(p)
+        
+    def set_state(self, state):
+        self.state = state
+        
+    def set_player(self, p):
+        self.player = p
+        self.teammate = [1 * p, 2 * p, 3 * p, 4 * p, 5 * p, 6 * p]
+        self.opponent = [-1 * p, -2 * p, -3 * p, -4 * p, -5 * p, -6 * p]
+        self.available_moves = []
+        self.opponent = []
+        
     def is_check(self, state=None, opponent=False):
         if state is None:
             state = self.state
@@ -374,96 +478,18 @@ class ChessEnv(gym.Env):
                     return True
         return False
 
-    def action_notation(self, ind):
-        indic = 'o'
-        # ind = self.action_space[action]
-        pos_from = self.available_moves[ind][0]
-        pos_to = self.available_moves[ind][1]
-        promoted = self.available_moves[ind][2]
-        if self.state[pos_to] == indic and self.state[pos_from] in [1, -1]:
-            if pos_from - pos_to == 2:
-                return "0-0-0"
-            elif pos_from - pos_to == -2:
-                return "0-0"
-            else:
-                return
-        if self.state[pos_from] in ['.', 'x']:
-            return
-        move = ChessEnv.piece_notations[self.state[pos_from]]
-        row_flag = False
-        col_flag = False
-        flag = False
-        for m in self.available_moves:
-            if m[1] == pos_to and self.state[m[0]] == self.state[pos_from]:
-                if m[0] == pos_from:
-                    continue
-                flag = True
-                if row_flag:
-                    pass
-                else:
-                    if m[0] % 8 == pos_from % 8:
-                        row_flag = True
-
-                if col_flag:
-                    pass
-                else:
-                    if m[0] // 8 == pos_from // 8:
-                        col_flag = True
-        if row_flag and col_flag:
-            move = move + index_to_pos(pos_from)
-        elif row_flag and self.state[pos_from] not in [6, -6]:
-            move = move + index_to_pos(pos_from)[1]
-        elif col_flag or flag:
-            move = move + index_to_pos(pos_from)[0]
-        if move == '' and self.state[pos_to] in self.opponent:
-            move = index_to_pos(pos_from)[0]
-        if self.state[pos_to] in self.opponent:
-            move = move + 'x'
-        move = move + index_to_pos(pos_to)
-        if self.state[pos_from] in [1, -1]:
-            if pos_from - pos_to == 2:
-                move = "0-0-0"
-            elif pos_from - pos_to == -2:
-                move = "0-0"
-        if promoted not in [0, '.', 'x', '', None]:
-            move = move + '=' + ChessEnv.piece_notations[promoted]
-        return move
-
-    def set_state(self, state=None):
-        if state is None:
-            self.reset()
-        else:
-            self.state = state
-
-    def set_game_file(self, file, move_file=None, move_list=None):
-        self.game_file = file
-        self.move_file = move_file
-        self.move_list = move_list
-
-    def print_state(self, state=None):
-        if state is None:
-            state = self.state
-        for ind in range(8):
-            for j in range(8):
-                index = 8*ind + j
-                print(state[index], end="\t")
-            print()
-
-    def set_nn(self, nn):
-        self.nn = nn
-
     def compute_moves(self):
         indic = 'o'
         self.reset_castling()
-        self.available_moves.clear()
-        self.opponent_moves.clear()
+        available_moves = []
+        opponent_moves = []
         for ind in range(64):
             if self.state[ind] in ['.', ' ', 'x', 0]:
                 continue
             if self.state[ind] in self.opponent:
-                self.opponent_moves.extend(self.compute_move_for(ind, opponent=True))
+                opponent_moves.extend(self.compute_move_for(ind, opponent=True))
                 continue
-            self.available_moves.extend(self.compute_move_for(ind))
+            available_moves.extend(self.compute_move_for(ind))
         self.check_enable_castling()
         self.check_enable_castling(opponent=True)
         if self.player == 1:
@@ -485,6 +511,7 @@ class ChessEnv(gym.Env):
             if self.state[62] == indic:
                 self.opponent_moves.append((60, 62, None))
         self.eliminate_move()
+        return available_moves, opponent_moves
 
     def compute_move_for(self, pos, opponent=False):
         moves = []
@@ -527,7 +554,7 @@ class ChessEnv(gym.Env):
         if piece in [1, -1] and (pos_from - pos_to) in [2, -2]:
             board[pos_from] = '.'
             board[pos_to] = piece
-            board[(pos_from + pos_to)//2] = 3 * self.player
+            board[(pos_from + pos_to) // 2] = 3 * self.player
             if pos_to % 8 == 2:
                 board[pos_from - 4] = '.'
             else:
@@ -546,8 +573,8 @@ class ChessEnv(gym.Env):
                 board[pos_to - 8] = '.'
         # Rest all case
         else:
-                board[pos_from] = '.'
-                board[pos_to] = piece
+            board[pos_from] = '.'
+            board[pos_to] = piece
         if not simulate:
             if piece == self.player:
                 self.king_castling = False
@@ -796,7 +823,7 @@ class ChessEnv(gym.Env):
         else:
             opp, mate = self.teammate, self.opponent
         row = pos // 8  # 6
-        col = pos % 8  #  4
+        col = pos % 8  # 4
         if row + 2 < 8:
             if col + 1 < 8:
                 p = 8 * (row + 2) + (col + 1)
@@ -942,7 +969,7 @@ class ChessEnv(gym.Env):
             return True
         self.opponent_moves = deepcopy(opp_moves)
         return False
-    
+
     def reset_castling(self, state=None):
         indic = 'o'
         if state is None:
