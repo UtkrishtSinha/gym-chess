@@ -3,11 +3,17 @@ from gym.envs.classic_control.rendering import Geom
 from copy import deepcopy
 import re
 
+def index_to_pos(index):
+    file = str(chr(97 + (index % 8)))
+    row = 8 - (index // 8)
+    return file + str(row)
+
 
 class MoveHandler:
 
     def __init__(self, p=None, state=None):
         self.player = 1
+        self.action = None
         self.opponent = []
         self.teammate = []
         self.empty = ['.', 'x', 'o']
@@ -26,6 +32,7 @@ class MoveHandler:
         else:
             self.state = ['.'] * 64
         self.en_p = None
+        self.captured_piece = None
 
     def reset(self):
         if self.state is None:
@@ -301,16 +308,21 @@ class MoveHandler:
             moves = self.king_move(pos, opponent=opponent)
         return moves
 
-    def move(self, move, simulate=True):
+    def move(self, move=None, action=None, simulate=True):
+        if action:
+            self.action = action
         self.en_p = None
         if simulate:
             board = deepcopy(self.state)
         else:
             board = self.state
+
         pos_from = move[0]
         pos_to = move[1]
         promotion = move[2]
         piece = board[pos_from]
+        if not simulate:
+            self.captured_piece = board[pos_to]
         if not simulate:
             if piece in ['.', 'x', 'o']:
                 print("Wrong move :- ", move, " for player = ", self.player)
@@ -349,6 +361,10 @@ class MoveHandler:
         else:
             board[pos_from] = '.'
             board[pos_to] = piece
+
+        self.clear_en_passant(board)
+        if piece in [-6, 6] and pos_from - pos_to in [-16, 16]:
+            board[(pos_from + pos_to) // 2] = 'x'
         if not simulate:
             if piece == self.player:
                 self.king_castling = False
@@ -752,6 +768,7 @@ class MoveHandler:
             self.opponent_moves = deepcopy(opp_moves)
             return True
         self.opponent_moves = deepcopy(opp_moves)
+
         return False
 
     def reset_castling(self, state=None):
@@ -771,7 +788,11 @@ class MoveHandler:
                 print(state[index], end="\t")
             print()
 
-    def to_string(self, move):
+    def to_string(self, move=None):
+        if move is None:
+            return ''
+        piece_notations = ['', 'K', 'Q', 'R', 'B', 'N', '', '', 'N', 'B', 'R', 'Q', 'K']
+        indic = 'o'
         pos_from = move[0]
         pos_to = move[1]
         promoted = move[2]
@@ -784,7 +805,7 @@ class MoveHandler:
                 return
         if self.state[pos_from] in ['.', 'x']:
             return
-        move = ChessEnv.piece_notations[self.state[pos_from]]
+        move = piece_notations[self.state[pos_from]]
         row_flag = False
         col_flag = False
         flag = False
@@ -823,7 +844,7 @@ class MoveHandler:
             elif pos_from - pos_to == -2:
                 move = "0-0"
         if promoted not in [0, '.', 'x', '', None]:
-            move = move + '=' + ChessEnv.piece_notations[promoted]
+            move = move + '=' + piece_notations[promoted]
         return move
 
     def get_description(self, move=None, string=None):
@@ -836,6 +857,10 @@ class MoveHandler:
         players = [None, 'White', 'Black']
         player = players[self.player]
         code = ''
+        if self.captured_piece in [1, 2, 3, 4, 5, 6, -1, -2, -3, -4, -5, -6]:
+            captured = [None, 'King', 'Queen', 'Rook', 'Bishop', 'Knight', 'Pawn', 'Knight', 'Bishop', 'Rook', 'Queen',
+                        'King']
+            self.captured_piece = captured[self.captured_piece]
         if move_string[0] in ['K', 'Q', 'R', 'B', 'N']:
             code = move_string[0]
         piece = self.get_piece_by_code(code)
@@ -849,7 +874,16 @@ class MoveHandler:
                 return player + ' castles King-Side'
             elif 'x' in move_string:
                 pos = re.findall(r'x[a-h][1-8]', move_string)[0]
-                desc = player + ' captures ' + self.captured_piece + ' at ' + pos[1] + pos[2] + ' using ' + piece
+                try:
+                    desc = player + ' captures ' + self.captured_piece + ' at ' + pos[1] + pos[2] + ' using ' + piece
+                except TypeError:
+                    print(move_string)
+                    print(player)
+                    print(self.captured_piece)
+                    print(pos)
+                    print(piece)
+                    print('action = ', self.action)
+                    exit(100)
             elif self.en_p:
                 at = re.findall('[a-h][1-8]', move_string)
                 at = at[len(at) - 1]
@@ -937,8 +971,9 @@ class Sprite():
 
 class Board(Geom):
 
-    def __init__(self, width=None, height=None, piece_arr=None, highlight_arr=None):
+    def __init__(self, width=512, height=512, piece_arr=None, highlight_arr=None):
         Geom.__init__(self)
+        self.bg = Sprite('Textures/Grey_Square.png', width + 32 + width, height)
         self.board = Sprite('Textures/Board.png', width, height)
         if piece_arr:
             self.pieces = piece_arr
@@ -947,6 +982,9 @@ class Board(Geom):
         self.highlights = [None] * 64
         if highlight_arr:
             self.highlights = highlight_arr
+        self.prom_area = Sprite('Textures/Dark_Square.png', width, height)
+        self.prom_area.x = width + 32
+        self.prom_piece = [None] * 4
 
     def update(self, move, highlight=False):
         self.clear_highlight()
@@ -971,7 +1009,7 @@ class Board(Geom):
         elif 'Pawn' in piece.img and pos_from % 8 != pos_to % 8 and cap is None:
             self.pieces[pos_from] = None
             self.set_at(pos=pos_to, piece=piece)
-            if 'White' in piece:
+            if 'White' in piece.img:
                 self.pieces[pos_to + 8] = None
             else:
                 self.pieces[pos_to - 8] = None
@@ -1046,12 +1084,17 @@ class Board(Geom):
             self.set_highlight(pos=i, highlight=state[1][i])
 
     def render1(self):
+        self.bg.draw()
         self.board.draw()
+        self.prom_area.draw()
         for i in range(64):
             if self.highlights[i]:
                 self.highlights[i].draw()
             if self.pieces[i]:
                 self.pieces[i].draw()
+        for j in range(4):
+            if self.prom_piece[j]:
+                self.prom_piece[j].draw()
 
     def reset(self):
         self.pieces.clear()
@@ -1076,6 +1119,30 @@ class Board(Geom):
     def clear_highlight(self):
         for i in range(64):
             self.highlights[i] = None
+
+    def create_prom_menu(self, player):
+        knight = self.get_piece(5 * player)
+        bishop = self.get_piece(4 * player)
+        rook = self.get_piece(3 * player)
+        queen = self.get_piece(2 * player)
+        self.prom_piece = [queen, rook, bishop, knight]
+        for p in self.prom_piece:
+            p.x = self.width + 32
+        if player == 1:
+            knight.y = self.height/2
+            bishop.y = 5 * self.height/8
+            rook.y = 6 * self.height/8
+            queen.y = 7 * self.height/8
+        else:
+            knight.y = 3 * self.height/8
+            bishop.y = 2 * self.height/8
+            rook.y = self.height/8
+
+
+    def clear_prom(self):
+        for j in range(4):
+            self.prom_piece[j] = None
+
 
     @property
     def width(self):
@@ -1104,10 +1171,16 @@ class Player:
         self.is_promotion = False
         self.moving_piece = None
 
-    def play(self, pos, pr=None):
+    def play(self, action):
+        print(action)
+        return None
+
+    def play1(self, pos, pr=None):
         if not 0 <= pos < 64:
             return None
         if self.fr is None and self.move_handler.state[pos] in self.move_handler.opponent:
+            return None
+        if self.fr is None and self.move_handler.state[pos] in ['.', 'x', 'o']:
             return None
         if self.fr is None:
             self.fr = pos
@@ -1130,6 +1203,9 @@ class Player:
                         return fr, to, None
                 else:
                     self.is_promotion = False
+                    if (self.fr, self.to, None) not in self.move_handler.available_moves:
+                        self.to = None
+                        return None
                     self.move_handler.move(move=(self.fr, self.to, None), simulate=False)
                     fr = self.fr
                     to = self.to
@@ -1151,6 +1227,9 @@ class Player:
                         return fr, to, None
                 else:
                     self.is_promotion = False
+                    if (self.fr, self.to, None) not in self.move_handler.available_moves:
+                        self.to = None
+                        return None
                     self.move_handler.move(move=(self.fr, self.to, None), simulate=False)
                     fr = self.fr
                     to = self.to
@@ -1162,7 +1241,9 @@ class Player:
                 return None
             else:
                 self.is_promotion = False
-                self.move_handler.move(move=(self.fr, self.to, None), simulate=False)
+                if (self.fr, self.to, abs(pr)*self.player) not in self.move_handler.available_moves:
+                    return None
+                self.move_handler.move(move=(self.fr, self.to, abs(pr)*self.player), simulate=False)
                 fr = self.fr
                 to = self.to
                 self.fr = None
@@ -1170,3 +1251,8 @@ class Player:
                 return fr, to, abs(pr)*self.player
         else:
             return None
+
+    def move_to_action(self, move):
+        for i in range(len(self.playing.move_handler.available_moves)):
+            if self.playing.move_handler.available_moves[i] == move:
+                return i
