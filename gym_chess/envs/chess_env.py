@@ -4,7 +4,7 @@ from gym import spaces
 from copy import deepcopy
 from gym.envs.classic_control.rendering import Viewer
 import re
-import time
+import pyglet
 
 
 def index_to_pos(index):
@@ -29,7 +29,7 @@ class ChessEnv(gym.Env):
     # Positive means White
     # Negative means Black
 
-    def __init__(self, player=1, state=None, piece_arr=None, highlight_arr=None, board_width=512, board_height=512):
+    def __init__(self, player=1, state=None, board=None, board_width=512, board_height=512):
         self.player = player
         self.state = state
         self.done = False
@@ -48,7 +48,9 @@ class ChessEnv(gym.Env):
         self.captured_piece = None
         self.en_p = None
         self.viewer = None
-        self.game_board = Board(board_width, board_height, piece_arr)
+        self.game_board = board
+        if board is None:
+            self.game_board = Board(board_width, board_height, piece_arr)
         self.a = board_width
         self.b = board_height
         self.should_close = False
@@ -59,6 +61,8 @@ class ChessEnv(gym.Env):
     def step(self, action):
         self.compute_moves()
         move_count = len(self.move_handler.available_moves)
+        if move_count == 0:
+            return self.state, 0, True, {'tuple': None, 'notation':'', 'description': 'Finished'}
         action = int(str(action))
         action = action % move_count
         # self.move = self.move_handler.available_moves[action]
@@ -66,7 +70,7 @@ class ChessEnv(gym.Env):
         self.move_handler.n = action
         self.move_string = self.action_notation(ind=action)
         self.m = self.move_handler.available_moves[action]
-        new_state, self.en_p = self.move_handler.move(self.m, simulate=False)
+        new_state, self.en_p = self.move_handler.move(self.m, action, simulate=False)
         # self.state = new_state
         reward = self.compute_reward(action)
         done = self.move_handler.is_over()
@@ -101,11 +105,15 @@ class ChessEnv(gym.Env):
         self.move_handler.reset()
         self.game_board.reset()
 
-    def render(self, mode='human', mouse_entered=None, mouse_exit=None, mouse_pressed=None):
+    def render(self, mode='human', player=None, mouse_entered=None, mouse_exit=None, mouse_pressed=None):
         if mode == 'state':
             self.print_state()
             return
         if mode == 'human':
+            if player is None:
+                player = self.player
+            if self.move_string is None:
+                return
             n = None
             ml = None
             f = open(self.game_file, 'a')
@@ -113,7 +121,7 @@ class ChessEnv(gym.Env):
                 n = open(self.move_file, 'a')
             if self.move_list is not None:
                 ml = open(self.move_list, 'a')
-            if self.player == 1:
+            if player == 1:
                 if self.move_count == 1:
                     f.write("\n\n")
                 f.write(str(self.move_count) + "." + self.move_string + " ")
@@ -127,10 +135,10 @@ class ChessEnv(gym.Env):
                 if n:
                     n.write("..." + str(self.m) + "\n")
             if ml:
-                if self.player == 1 and self.move_count == 1:
+                if player == 1 and self.move_count == 1:
                     ml.write("\n\n")
                 ml.write(str(self.n) + ",")
-                if self.move_count % 10 == 0 and self.player == -1:
+                if self.move_count % 10 == 0 and player == -1:
                     ml.write("\n         ")
                 else:
                     ml.write(" ")
@@ -297,6 +305,9 @@ class ChessEnv(gym.Env):
                 return pieces[i]
         return 'Pawn'
 
+    def is_bot(self):
+        return True
+
     def close(self):
         if self.viewer:
             self.viewer.window.close()
@@ -311,22 +322,34 @@ class ChessEnv(gym.Env):
 class PlayerEnv(gym.Env):
     metadata = {'render.modes': ['human', 'state', 'board']}
 
-    def __init__(self, player, board, state):
+    def __init__(self, player, board=None, state=None):
         self.board = board
+        if not board:
+            self.board = Board(512, 512)
         self.p = player
-        self.state = ['.'] * 64
+        self.state = state
+        if not state:
+            self.state = ['.'] * 64
         self.observation_space = spaces.Box(-6, 6, (64,), dtype=int)
-        self.action_space = spaces.Discrete(n=100)
+        self.action_space = spaces.Discrete(n=64)
         self.player = Player(player=self.p, state=self.state)
         self.move_handler = self.player.move_handler
         self.viewer = None
+        self.fr = None
+        self.to = None
+        self.game_file = None
+        self.move_file = None
+        self.move_list = None
+        self.move_string = None
 
     def step(self, action):
-        moved = self.player.play(action)
-        if moved:
-            return self.move_handler.state, 0, self.move_handler.is_over(), self.move_handler.get_description(move=moved)
-        else:
-            return self.move_handler.state, 0, False, None
+        move = self.move_handler.available_moves[action]
+        self.move_string = self.move_handler.to_string(move)
+        state, _ = self.move_handler.move(move=move, action=action, simulate=False)
+        self.board.update(move, True)
+        done = self.move_handler.is_over()
+        desc = self.move_handler.get_description(string=self.move_string)
+        return state, 0, done, {'tuple': move, 'notation': self.move_string, 'description': desc}
 
     def reset(self):
         self.player.move_handler.reset()
@@ -392,6 +415,25 @@ class PlayerEnv(gym.Env):
                     pieces.append(self.game_board.pieces[i])
                 return pieces
 
+    def set_game_file(self, file, move_file=None, move_list=None):
+        self.game_file = file
+        self.move_file = move_file
+        self.move_list = move_list
+
+    def is_bot(self):
+        return False
+
+    def compute_moves(self):
+        self.move_handler.compute_moves()
+
+    def close(self):
+        if self.viewer:
+            self.viewer.close()
+            self.viewer = None
+
+    def __del__(self):
+        self.close()
+
 class ChessGameTwoPlayers(gym.Env):
     metadata = {'render.modes': ['human', 'state', 'board']}
 
@@ -403,13 +445,13 @@ class ChessGameTwoPlayers(gym.Env):
         self.observation_space = spaces.Box(-6, 6, (64,), dtype=int)
         self.action_space = spaces.Discrete(n=100)
         if bot_white:
-            self.player1 = ChessEnv(player=1, state=self.state, piece_arr=self.board.pieces, highlight_arr=self.board.highlights,
+            self.player1 = ChessEnv(player=1, state=self.state, board=self.board,
                                 board_width=board_w, board_height=board_h)
         else:
             self.player1 = PlayerEnv(player=1, state=self.state, board=self.board)
 
         if bot_black:
-            self.player2 = ChessEnv(player=-1, state=self.state, piece_arr=self.board.pieces, highlight_arr=self.board.highlights,
+            self.player2 = ChessEnv(player=-1, state=self.state, board=self.board,
                                 board_width=board_w, board_height=board_h)
         else:
             self.player2 = PlayerEnv(player=-1, state=self.state, board=self.board)
@@ -417,11 +459,44 @@ class ChessGameTwoPlayers(gym.Env):
         self.playing = self.player1
         self.viewer = None
         self.should_close = False
+        self.mouse_on = True
+        self.pos = None
+        self.fr = None
+        self.to = None
+        self.played = None
+        self.promotion = False
+        self.promoted = None
 
     def step(self, action):
-        return_step = self.playing.step(action)
-        self.switch_player()
-        return return_step
+        if self.playing.is_bot():
+            state, reward, done, info = self.playing.step(action)
+            self.played = self.playing
+            self.switch_player()
+            return state, reward, done, info
+        else:
+            move = None
+            if self.pos is not None or self.promoted is not None:
+                move = self.get_move(self.pos)
+                self.board.clear_highlight()
+                if move:
+                    self.board.clear_prom()
+                    action = self.move_to_action(move)
+                    state, reward, done, info = self.playing.step(action)
+                    self.switch_player()
+                    self.promoted = None
+                    self.promotion = False
+                    self.pos = None
+                    return state, reward, done, info
+                else:
+                    self.highlight_moves(int(self.pos))
+                self.pos = None
+            state = self.playing.state
+            reward = 0
+            done = self.playing.move_handler.is_over()
+            notation = self.playing.move_handler.to_string(move)
+            desc = self.playing.move_handler.get_description(move=move)
+            info = {'tuple': move, 'notation': notation, 'description': desc}
+            return state, reward, done, info
 
     def reset(self):
         state = [-3, -5, -4, -2, -1, -4, -5, -3,
@@ -435,28 +510,41 @@ class ChessGameTwoPlayers(gym.Env):
         for i in range(64):
             self.state[i] = state[i]
         self.board.reset()
+        self.playing = self.player1
+        self.playing.compute_moves()
 
     def render(self, mode='board',  mouse_entered=None, mouse_exit=None, mouse_pressed=None):
         if mode=='human':
-            self.playing.render(mode)
+            if self.played:
+                self.played.render(mode)
             return True
         elif mode=='state':
-            self.playing.render(mode)
+            if self.played:
+                self.played.render(mode)
             return True
         elif mode=='board':
             if self.should_close:
                 return False
-            if self.viewer is None:
-                self.viewer = Viewer(self.a, self.b)
+            if not self.viewer:
+                self.viewer = Viewer(self.a + self.a//8 + 32, self.b)
                 if mouse_entered:
                     self.unwrapped.viewer.window.on_mouse_enter = mouse_entered
+                else:
+                    self.unwrapped.viewer.window.on_mouse_enter = self.mouse_enter
                 if mouse_exit:
                     self.unwrapped.viewer.window.on_mouse_leave = mouse_exit
+                else:
+                    self.unwrapped.viewer.window.on_mouse_leave = self.mouse_exit
                 if mouse_pressed:
                     self.unwrapped.viewer.window.on_mouse_press = mouse_pressed
+                else:
+                    self.unwrapped.viewer.window.on_mouse_press = self.mouse
                 self.unwrapped.viewer.window.on_close = self.close_window
                 self.viewer.add_geom(self.board)
-            self.viewer.render(False)
+            try:
+                self.viewer.render(False)
+            except AttributeError as e:
+                print(e)
             return True
         elif mode=='pieces':
             pieces = []
@@ -469,25 +557,127 @@ class ChessGameTwoPlayers(gym.Env):
             self.playing = self.player2
         else:
             self.playing = self.player1
+        self.playing.compute_moves()
 
     def set_game_file(self, file, move_file=None, move_list=None):
         self.player1.set_game_file(file, move_file, move_list)
+        self.player2.set_game_file(file, move_file, move_list)
 
     def print_state(self):
         self.playing.print_state()
 
     def close_window(self):
-        self.should_close = True
+        if self.prom_view:
+            self.prom_view.close()
+            self.prom_view = None
+
+        if self.viewer:
+            self.viewer.close()
+            self.viewer = None
+            self.should_close = True
+
+    def mouse(self, x, y, button, modifiers):
+        if self.playing.is_bot():
+            self.pos = None
+            return
+        if button == pyglet.window.mouse.LEFT:
+            self.pos = self.mouse_to_pos(x, y)
+            self.promoted = self.get_promoted(x, y)
+
+    def get_promoted(self, x, y):
+        if x < self.a + 32:
+            return None
+        if y < self.b // 8:
+            return -2
+        elif y < 2 * self.b // 8:
+            return -3
+        elif y < 3 * self.b // 8:
+            return -4
+        elif y < 4 * self.b // 8:
+            return -5
+        elif y < 5 * self.b // 8:
+            return 5
+        elif y < 6 * self.b // 8:
+            return 4
+        elif y < 7 * self.b // 8:
+            return 3
+        elif y < self.b:
+            return 2
+        else:
+            return None
+
+    def mouse_enter(self, x, y):
+        self.mouse_on = True
+
+    def mouse_exit(self, x, y):
+        self.mouse_on = False
+
+    def mouse_to_pos(self, x, y):
+        if x is None or y is None:
+            return None
+        if self.promotion:
+            return None
+        r = 7 - (y // (self.b/8))
+        c = x // (self.a/8)
+        if 0 <= r <= 7 and 0 <= c <= 7:
+            return 8 * r + c
+        else:
+            None
 
     def close(self):
         if self.viewer:
             self.viewer.close()
             self.viewer = None
 
+    def highlight_moves(self, pos):
+        if self.state[pos] not in self.playing.move_handler.teammate:
+            return
+        row = pos // 8
+        col = pos % 8
+
+        if row % 2 == col % 2:
+            selected = Sprite('Textures/Selected_Light.png', self.a/8, self.b/8)
+        else:
+            selected = Sprite('Textures/Selected_Dark.png', self.a/8, self.b/8)
+
+        self.board.set_highlight(pos, selected)
+
+        for m in self.playing.move_handler.available_moves:
+            if m[0] == pos:
+                moves = Sprite('Textures/moves.png', self.a / 8, self.b / 8)
+                self.board.set_highlight(m[1], moves)
+
+    def get_move(self, pos):
+        if pos is not None:
+            pos = int(pos)
+        if not self.promotion:
+            if self.state[pos] in self.playing.move_handler.teammate:
+                self.fr = pos
+            if not self.fr:
+                return None
+            else:
+                for move in self.playing.move_handler.available_moves:
+                    if move[0] == self.fr and move[1] == pos:
+                        self.to = pos
+                        if move[2]:
+                            self.promotion = True
+                            self.board.create_prom_menu(self.playing.p)
+                            return None
+                        else:
+                            return move
+        else:
+            if self.promoted:
+                return (self.fr, self.to, self.promoted)
+            else:
+                return None
+
     def move_to_action(self, move):
         for i in range(len(self.playing.move_handler.available_moves)):
             if self.playing.move_handler.available_moves[i] == move:
                 return i
+
+    def close_prom(self):
+        print("closing...")
 
     def __del__(self):
         self.close()
