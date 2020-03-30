@@ -10,6 +10,19 @@ def index_to_pos(index):
 
 
 class MoveHandler:
+    hash_values = [313, 317, 337, 347, 349, 353, 359, 367,
+                   373, 379, 383, 389, 397, 401, 409, 419,
+                   421, 431, 439, 443, 449, 457, 461, 463,
+                   467, 479, 487, 491, 499, 503, 509, 521,
+                   523, 541, 547, 557, 563, 569, 571, 577,
+                   587, 593, 599, 601, 607, 613, 617, 619,
+                   631, 641, 643, 647, 653, 659, 661, 673,
+                   677, 683, 691, 701, 709, 719, 727, 733]
+
+    piece_hash = [0, 7907, 7351, 6829, 5783, 5323, 4943, 4937, 5333, 5791, 6833, 7919, 7369]
+
+    board_hashes = []
+    no_pawn_count = 0
 
     def __init__(self, p=None, state=None):
         self.player = 1
@@ -51,6 +64,28 @@ class MoveHandler:
             self.state[i] = state[i]
         self.available_moves.clear()
         self.opponent_moves.clear()
+        if self.player == 1:
+            MoveHandler.board_hashes.clear()
+            MoveHandler.board_hashes.append(self.compute_hash())
+        MoveHandler.no_pawn_count = 0
+
+    def compute_hash(self, state=None, playerturn=None):
+        if state is None:
+            state = self.state
+        if playerturn is None:
+            playerturn = self.player
+        hash = 0
+        for i in range(64):
+            if state[i] in ['.', 'x', 'o']:
+                continue
+            else:
+                hash = hash + MoveHandler.hash_values[i] * MoveHandler.piece_hash[state[i]]
+
+        return hash * playerturn
+
+    def compute_hash_for(self, move):
+        board = self.move(move, simulate=True)
+        return self.compute_hash(board, self.player * - 1)
 
     def set_state(self, state):
         for i in range(64):
@@ -76,15 +111,27 @@ class MoveHandler:
                 king_pos = ind
                 break
 
-        king_row = king_pos // 8
-        king_col = king_pos % 8
+        if king_pos is None:
+            exit(1000)
+        else:
+            return self.is_square_attacked(king_pos, state, opponent)
 
-        if king == 1:
+    def is_square_attacked(self, square, state=None, opponent=False):
+        if state is None:
+            state = self.state
+        player = self.player
+        if opponent:
+            player = player * -1
+
+        square_row = square // 8
+        square_col = square % 8
+
+        if player == 1:
             opponent = [-2, -3]
         else:
             opponent = [2, 3]
-        for row in range(king_row + 1, 8):
-            pos = 8 * row + king_col
+        for row in range(square_row + 1, 8):
+            pos = 8 * row + square_col
             if state[pos] in ['.', 'x']:
                 continue
             if state[pos] in opponent:
@@ -92,8 +139,8 @@ class MoveHandler:
             else:
                 break
 
-        for row in range(king_row - 1, -1, -1):
-            pos = 8 * row + king_col
+        for row in range(square_row - 1, -1, -1):
+            pos = 8 * row + square_col
             if state[pos] in ['.', 'x']:
                 continue
             if state[pos] in opponent:
@@ -101,8 +148,8 @@ class MoveHandler:
             else:
                 break
 
-        for col in range(king_col + 1, 8):
-            pos = 8 * king_row + col
+        for col in range(square_col + 1, 8):
+            pos = 8 * square_row + col
             if state[pos] in ['.', 'x']:
                 continue
             if state[pos] in opponent:
@@ -110,8 +157,8 @@ class MoveHandler:
             else:
                 break
 
-        for col in range(king_col - 1, -1, -1):
-            pos = 8 * king_row + col
+        for col in range(square_col - 1, -1, -1):
+            pos = 8 * square_row + col
             if state[pos] in ['.', 'x']:
                 continue
             if state[pos] in opponent:
@@ -119,12 +166,12 @@ class MoveHandler:
             else:
                 break
 
-        if king == 1:
+        if player == 1:
             opponent = [-2, -4]
         else:
             opponent = [2, 4]
-        for row_ul in range(king_row + 1, 8):
-            col = (king_row + king_col) - row_ul
+        for row_ul in range(square_row + 1, 8):
+            col = (square_row + square_col) - row_ul
             if col > 7 or col < 0:
                 break
             pos = 8 * row_ul + col
@@ -135,8 +182,8 @@ class MoveHandler:
             else:
                 break
 
-        for row_ur in range(king_row + 1, 8):
-            col = row_ur + (king_col - king_row)
+        for row_ur in range(square_row + 1, 8):
+            col = row_ur + (square_col - square_row)
             if col > 7 or col < 0:
                 break
             pos = 8 * row_ur + col
@@ -147,8 +194,8 @@ class MoveHandler:
             else:
                 break
 
-        for row_dr in range(king_row - 1, -1, -1):
-            col = (king_row + king_col) - row_dr
+        for row_dr in range(square_row - 1, -1, -1):
+            col = (square_row + square_col) - row_dr
             if col > 7 or col < 0:
                 break
             pos = 8 * row_dr + col
@@ -159,8 +206,8 @@ class MoveHandler:
             else:
                 break
 
-        for row_dl in range(king_row - 1, -1, -1):
-            col = row_dl + (king_col - king_row)
+        for row_dl in range(square_row - 1, -1, -1):
+            col = row_dl + (square_col - square_row)
             if col > 7 or col < 0:
                 break
             pos = 8 * row_dl + col
@@ -171,92 +218,95 @@ class MoveHandler:
             else:
                 break
 
-        if king == 1:
-            if 0 < king_row <= 7 and 0 < king_col < 7:
-                pos = 8 * (king_row - 1) + (king_col + 1)
+        if player == 1:
+            if 0 < square_row <= 7 and 0 < square_col < 7:
+                pos = 8 * (square_row - 1) + (square_col + 1)
                 if state[pos] == -6:
                     return True
-                pos = 8 * (king_row - 1) + (king_col - 1)
+                pos = 8 * (square_row - 1) + (square_col - 1)
                 if state[pos] == -6:
                     return True
-            elif 0 < king_row <= 7 and king_col == 0:
-                pos = 8 * (king_row - 1) + (king_col + 1)
+            elif 0 < square_row <= 7 and square_col == 0:
+                pos = 8 * (square_row - 1) + (square_col + 1)
                 if state[pos] == -6:
                     return True
-            elif 0 < king_row <= 7 and king_col == 7:
-                pos = 8 * (king_row - 1) + (king_col - 1)
+            elif 0 < square_row <= 7 and square_col == 7:
+                pos = 8 * (square_row - 1) + (square_col - 1)
                 if state[pos] == -6:
                     return True
 
-        if king == -1:
-            if 0 <= king_row < 7 and 0 < king_col < 7:
-                pos = 8 * (king_row + 1) + (king_col + 1)
+        if player == -1:
+            if 0 <= square_row < 7 and 0 < square_col < 7:
+                pos = 8 * (square_row + 1) + (square_col + 1)
                 if state[pos] == 6:
                     return True
-                pos = 8 * (king_row + 1) + (king_col - 1)
+                pos = 8 * (square_row + 1) + (square_col - 1)
                 if state[pos] == 6:
                     return True
-            elif 0 <= king_row < 7 and king_col == 0:
-                pos = 8 * (king_row + 1) + (king_col + 1)
+            elif 0 <= square_row < 7 and square_col == 0:
+                pos = 8 * (square_row + 1) + (square_col + 1)
                 if state[pos] == 6:
                     return True
-            elif 0 <= king_row < 7 and king_col == 7:
-                pos = 8 * (king_row + 1) + (king_col - 1)
+            elif 0 <= square_row < 7 and square_col == 7:
+                pos = 8 * (square_row + 1) + (square_col - 1)
                 if state[pos] == 6:
                     return True
 
-        if king_row + 2 < 8:
-            if king_col + 1 < 8:
-                pos = 8 * (king_row + 2) + (king_col + 1)
-                if state[pos] == (-5 * king):
+        if square_row + 2 < 8:
+            if square_col + 1 < 8:
+                pos = 8 * (square_row + 2) + (square_col + 1)
+                if state[pos] == (-5 * player):
                     return True
 
-            if king_col - 1 >= 0:
-                pos = 8 * (king_row + 2) + (king_col - 1)
-                if state[pos] == (-5 * king):
+            if square_col - 1 >= 0:
+                pos = 8 * (square_row + 2) + (square_col - 1)
+                if state[pos] == (-5 * player):
                     return True
 
-        if king_row + 1 < 8:
-            if king_col + 2 < 8:
-                pos = 8 * (king_row + 1) + (king_col + 2)
-                if state[pos] == (-5 * king):
+        if square_row + 1 < 8:
+            if square_col + 2 < 8:
+                pos = 8 * (square_row + 1) + (square_col + 2)
+                if state[pos] == (-5 * player):
                     return True
 
-            if king_col - 2 >= 0:
-                pos = 8 * (king_row + 1) + (king_col - 2)
-                if state[pos] == (-5 * king):
+            if square_col - 2 >= 0:
+                pos = 8 * (square_row + 1) + (square_col - 2)
+                if state[pos] == (-5 * player):
                     return True
 
-        if king_row - 1 >= 0:
-            if king_col + 2 < 8:
-                pos = 8 * (king_row - 1) + (king_col + 2)
-                if state[pos] == (-5 * king):
+        if square_row - 1 >= 0:
+            if square_col + 2 < 8:
+                pos = 8 * (square_row - 1) + (square_col + 2)
+                if state[pos] == (-5 * player):
                     return True
 
-            if king_col - 2 >= 0:
-                pos = 8 * (king_row - 1) + (king_col - 2)
-                if state[pos] == (-5 * king):
+            if square_col - 2 >= 0:
+                pos = 8 * (square_row - 1) + (square_col - 2)
+                if state[pos] == (-5 * player):
                     return True
 
-        if king_row - 2 >= 0:
-            if king_col + 1 < 8:
-                pos = 8 * (king_row - 2) + (king_col + 1)
-                if state[pos] == (-5 * king):
+        if square_row - 2 >= 0:
+            if square_col + 1 < 8:
+                pos = 8 * (square_row - 2) + (square_col + 1)
+                if state[pos] == (-5 * player):
                     return True
 
-            if king_col - 1 >= 0:
-                pos = 8 * (king_row - 2) + (king_col - 1)
-                if state[pos] == (-5 * king):
+            if square_col - 1 >= 0:
+                pos = 8 * (square_row - 2) + (square_col - 1)
+                if state[pos] == (-5 * player):
                     return True
 
-        for row in range(king_row - 1, king_row + 2):
-            for col in range(king_col - 1, king_col + 2):
+        for row in range(square_row - 1, square_row + 2):
+            for col in range(square_col - 1, square_col + 2):
                 if not 0 <= row <= 7 or not 0 <= col <= 7:
                     continue
                 p = 8 * row + col
-                if state[p] == king * -1:
+                if state[p] == player * -1:
                     return True
         return False
+
+    def evaluate_board(self, player=None, board=None):
+        return 1
 
     def compute_moves(self):
         indic = 'o'
@@ -365,6 +415,7 @@ class MoveHandler:
         self.clear_en_passant(board)
         if piece in [-6, 6] and pos_from - pos_to in [-16, 16]:
             board[(pos_from + pos_to) // 2] = 'x'
+
         if not simulate:
             if piece == self.player:
                 self.king_castling = False
@@ -373,6 +424,14 @@ class MoveHandler:
                 self.queen_castling = False
             if piece == 3 * self.player and pos_from % 8 == 7:
                 self.king_castling = False
+            hash = self.compute_hash(board, self.player * -1)
+            MoveHandler.board_hashes.append(hash)
+
+            if piece == 6 * self.player:
+                MoveHandler.no_pawn_count = 0
+            else:
+                MoveHandler.no_pawn_count += 1
+
         return board, self.en_p
 
     def clear_en_passant(self, state=None):
@@ -762,6 +821,12 @@ class MoveHandler:
                             state[62] = indic
 
     def is_over(self):
+        total_hashes = len(MoveHandler.board_hashes)
+        hash = MoveHandler.board_hashes[total_hashes - 1]
+        if MoveHandler.board_hashes.count(hash) >= 3:
+            return True
+        if MoveHandler.no_pawn_count >= 50:
+            return True
         opp_moves = deepcopy(self.opponent_moves)
         self.opponent_moves = self.eliminate_move(opponent=True)
         if len(self.opponent_moves) == 0:
